@@ -1,142 +1,82 @@
-import requests  # For making HTTP requests to external APIs like VirusTotal.
-import base64  # For encoding URLs into a safe format for VirusTotal's API.
-import time  # For adding delays between API calls to avoid rate limits.
-from datetime import datetime  # For logging the time of scans.
+import requests
+import base64
+import time
 
-# Welcome message displayed to the user when the program starts.
-print("Welcome to the Cybersecurity Tools for Incident Response and Threat Hunting!\n")
-
-# API key to authenticate requests to the VirusTotal API. Keep this key secure and do not share it.
+# API key for VirusTotal (replace with your own key).
 API_KEY = ""
-
-# Base URL for all VirusTotal API requests.
-base_url = "https://www.virustotal.com/api/v3"
-
-# Header containing authentication and other metadata for API requests.
-headers = {
-    "accept": "application/json",  # Requests data in JSON format.
-    "x-apikey": API_KEY,  # API key for authentication with the VirusTotal API.
+# Headers for API requests.
+HEADERS = {
+    "accept": "application/json",
+    "x-apikey": API_KEY,
 }
 
-def log_scan(activity_type, target, malicious_percentage):
-    """
-    Logs the results of a scan with a timestamp.
-    Parameters:
-        - activity_type: Type of scan (e.g., "IP" or "URL").
-        - target: The target of the scan (IP address or URL).
-        - malicious_percentage: Percentage of security vendors that flagged the target as malicious.
-    """
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # Current date and time.
-    print(f"[{timestamp}] {activity_type} Scan: {target}")
-    print(f"  Malicious Percentage: {malicious_percentage:.2f}%\n")
+def get_ip_location(ip):
+    """Get geolocation details for an IP address using ip-api."""
+    response = requests.get(f"http://ip-api.com/json/{ip}")
+    if response.status_code == 200:
+        data = response.json()
+        if data["status"] == "success":
+            return {
+                "Country": data.get("country"),
+                "Region": data.get("regionName"),
+                "City": data.get("city"),
+                "Latitude": data.get("lat"),
+                "Longitude": data.get("lon"),
+                "ISP": data.get("isp"),
+            }
+    return None
+def scan_ip(ip):
+    """Scan an IP address for malicious activity using VirusTotal."""
+    url = f"https://www.virustotal.com/api/v3/ip_addresses/{ip}"
+    response = requests.get(url, headers=HEADERS)
+    if response.status_code == 200:
+        data = response.json()
+        stats = data.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
+        malicious = stats.get("malicious", 0)
+        total = sum(stats.values())
+        percentage = (malicious / total * 100) if total > 0 else 0
+        return percentage
+    return None
 
-def scan_ip(ip_address):
-    """
-    Scans an IP address for malicious activity using VirusTotal's API.
-    Parameters:
-        - ip_address: The IP address to scan.
-    Returns:
-        - malicious_percentage: Percentage of vendors that flagged the IP as malicious.
-    """
-    # API endpoint for scanning IP addresses.
-    api_url = f"{base_url}/ip_addresses/{ip_address}"
-    response = requests.get(api_url, headers=headers)  # Makes a GET request to the VirusTotal API.
+def scan_url(url):
+    """Scan a URL for malicious activity using VirusTotal."""
+    submit_url = "https://www.virustotal.com/api/v3/urls"
+    payload = {"url": url}
+    response = requests.post(submit_url, headers=HEADERS, data=payload)
+    if response.status_code == 200:
+        url_id = base64.urlsafe_b64encode(url.encode()).decode().strip("=")
+        time.sleep(15)  # Wait for analysis to complete.
+        result_url = f"https://www.virustotal.com/api/v3/urls/{url_id}"
+        result_response = requests.get(result_url, headers=HEADERS)
+        if result_response.status_code == 200:
+            data = result_response.json()
+            stats = data.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
+            malicious = stats.get("malicious", 0)
+            total = sum(stats.values())
+            percentage = (malicious / total * 100) if total > 0 else 0
+            return percentage
+    return None
 
-    if response.status_code == 200:  # Checks if the request was successful.
-        data = response.json()  # Parses the response as JSON.
-        # Calculates the malicious percentage.
-        total_count = sum(
-            data.get("data", {})
-                .get("attributes", {})
-                .get("last_analysis_stats", {})
-                .values()
-        )
-        malicious_percentage = (
-            data.get("data", {})
-                .get("attributes", {})
-                .get("last_analysis_stats", {})
-                .get("malicious", 0) / total_count * 100 if total_count > 0 else 0
-        )
-        log_scan("IP", ip_address, malicious_percentage)  # Logs the scan results.
-        return malicious_percentage
-    else:
-        # Error handling for unsuccessful API responses.
-        print(f"Error scanning IP ({ip_address}): {response.status_code} - {response.text}")
-        return None
-
-def scan_url(url_to_scan):
-    """
-    Scans a URL for malicious activity using VirusTotal's API.
-    Parameters:
-        - url_to_scan: The URL to scan.
-    Returns:
-        - malicious_percentage: Percentage of vendors that flagged the URL as malicious.
-    """
-    api_url = f"{base_url}/urls"  # API endpoint for submitting URLs for scanning.
-    payload = {"url": url_to_scan}  # Payload containing the URL to be scanned.
-    response = requests.post(api_url, headers=headers, data=payload)  # Sends a POST request to submit the URL.
-
-    if response.status_code == 200:  # Checks if the URL submission was successful.
-        analysis_id = response.json().get("data", {}).get("id")  # Retrieves the analysis ID.
-        if analysis_id:
-            # Encodes the URL into a format that VirusTotal accepts.
-            url_id = base64.urlsafe_b64encode(url_to_scan.encode()).decode().strip("=")
-            time.sleep(15)  # Waits for the analysis to complete (VirusTotal processing time).
-            analysis_url = f"{base_url}/urls/{url_id}"  # Endpoint for retrieving the analysis results.
-            analysis_response = requests.get(analysis_url, headers=headers)  # Retrieves the analysis.
-
-            if analysis_response.status_code == 200:  # Checks if the analysis retrieval was successful.
-                data = analysis_response.json()  # Parses the analysis response as JSON.
-                # Calculates the malicious percentage.
-                total_count = sum(
-                    data.get("data", {})
-                        .get("attributes", {})
-                        .get("last_analysis_stats", {})
-                        .values()
-                )
-                malicious_percentage = (
-                    data.get("data", {})
-                        .get("attributes", {})
-                        .get("last_analysis_stats", {})
-                        .get("malicious", 0) / total_count * 100 if total_count > 0 else 0
-                )
-                log_scan("URL", url_to_scan, malicious_percentage)  # Logs the scan results.
-                return malicious_percentage
-            else:
-                # Error handling for unsuccessful analysis retrieval.
-                print(f"Error retrieving analysis for URL ({url_to_scan}): {analysis_response.status_code} - {analysis_response.text}")
-                return None
+if __name__ == "__main__":
+    ip = input("Enter an IP address to scan: ").strip()
+    if ip:
+        print(f"Scanning IP: {ip}")
+        mal_percent = scan_ip(ip)
+        if mal_percent is not None:
+            print(f"Malicious Percentage: {mal_percent:.2f}%")
+            location = get_ip_location(ip)
+            if location:
+                print("Location Details:")
+                for key, value in location.items():
+                    print(f"  {key}: {value}")
         else:
-            # Error handling for missing analysis ID.
-            print(f"Error: No analysis ID returned for URL ({url_to_scan}).")
-            return None
-    else:
-        # Error handling for unsuccessful URL submission.
-        print(f"Error submitting URL ({url_to_scan}): {response.status_code} - {response.text}")
-        return None
+            print("Failed to scan IP.")
 
-if __name__ == "__main__":  # Ensures this block only runs when the script is executed directly.
-    # Prompts the user to enter an IP address and a URL for scanning.
-    ip_to_scan = input("Enter the IP address for scanning: ").strip()
-    url_to_scan = input("Enter the URL for scanning: ").strip()
-
-    if ip_to_scan:  # If the user entered an IP address.
-        print(f"\nScanning IP: {ip_to_scan}")
-        malicious_percentage = scan_ip(ip_to_scan)
-        if malicious_percentage is not None:
-            if malicious_percentage > 0:
-                print(f"IP Address {ip_to_scan} is malicious. Detected by {malicious_percentage:.2f}% of security vendors.")
-            else:
-                print(f"IP Address {ip_to_scan} is not malicious. Detected by {malicious_percentage:.2f}% of security vendors.")
-
-    if url_to_scan:  # If the user entered a URL.
-        print(f"\nScanning URL: {url_to_scan}")
-        malicious_percentage = scan_url(url_to_scan)
-        if malicious_percentage is not None:
-            if malicious_percentage > 0:
-                print(f"URL {url_to_scan} is malicious. Detected by {malicious_percentage:.2f}% of security vendors.")
-            else:
-                print(f"URL {url_to_scan} is not malicious. Detected by {malicious_percentage:.2f}% of security vendors.")
-
-    # Final message indicating the scanning process is complete.
-    print("\nScanning complete!")
+    url = input("\nEnter a URL to scan: ").strip()
+    if url:
+        print(f"Scanning URL: {url}")
+        mal_percent = scan_url(url)
+        if mal_percent is not None:
+            print(f"Malicious Percentage: {mal_percent:.2f}%")
+        else:
+            print("Failed to scan URL.")
