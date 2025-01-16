@@ -1,21 +1,51 @@
-import requests
-import base64
-import time
+import requests  # For making HTTP requests to external APIs like VirusTotal.
+import base64  # For encoding URLs into a safe format for VirusTotal's API.
+import time  # For adding delays between API calls to avoid rate limits.
+from datetime import datetime  # For logging the time of scans.
 
-# API key for VirusTotal (replace with your own key).
+# Display a welcome message to the user when the program starts.
+print("Welcome to the Cybersecurity Tools for Incident Response and Threat Hunting!\n")
+
+# API key for VirusTotal (replace this with your personal API key).
 API_KEY = ""
-# Headers for API requests.
+
+# HTTP headers required for VirusTotal API requests.
 HEADERS = {
-    "accept": "application/json",
-    "x-apikey": API_KEY,
+    "accept": "application/json",  # Specify the expected response format.
+    "x-apikey": API_KEY,  # Authenticate using the API key.
 }
 
+def log_scan(activity_type, target, malicious_percentage):
+    """
+    Logs the results of a scan with a timestamp.
+
+    Parameters:
+        - activity_type: The type of scan performed (e.g., "IP" or "URL").
+        - target: The scanned target (e.g., IP address or URL).
+        - malicious_percentage: The percentage of detections flagged as malicious.
+    """
+    # Record the current timestamp in a readable format.
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # Print the scan details with a timestamp.
+    print(f"[{timestamp}] {activity_type} Scan: {target}")
+    print(f"  Malicious Percentage: {malicious_percentage:.2f}%\n")
+
 def get_ip_location(ip):
-    """Get geolocation details for an IP address using ip-api."""
+    """
+    Fetch geolocation details for an IP address using the ip-api service.
+
+    Parameters:
+        - ip: The IP address to query.
+
+    Returns:
+        A dictionary containing location details if successful, None otherwise.
+    """
+    # Make a GET request to ip-api for geolocation data.
     response = requests.get(f"http://ip-api.com/json/{ip}")
-    if response.status_code == 200:
+    if response.status_code == 200:  # Check if the request was successful.
         data = response.json()
-        if data["status"] == "success":
+        if data["status"] == "success":  # Verify the response indicates success.
+            # Extract and return location details.
             return {
                 "Country": data.get("country"),
                 "Region": data.get("regionName"),
@@ -24,59 +54,87 @@ def get_ip_location(ip):
                 "Longitude": data.get("lon"),
                 "ISP": data.get("isp"),
             }
-    return None
+    return None  # Return None if the request failed or data was unavailable.
+
 def scan_ip(ip):
-    """Scan an IP address for malicious activity using VirusTotal."""
+    """
+    Scan an IP address for malicious activity using VirusTotal.
+
+    Parameters:
+        - ip: The IP address to scan.
+
+    Returns:
+        The percentage of detections flagged as malicious, or None on failure.
+    """
+    # Construct the VirusTotal API URL for IP scans.
     url = f"https://www.virustotal.com/api/v3/ip_addresses/{ip}"
     response = requests.get(url, headers=HEADERS)
-    if response.status_code == 200:
+    if response.status_code == 200:  # Check if the request was successful.
         data = response.json()
+        # Extract analysis statistics from the response.
         stats = data.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
-        malicious = stats.get("malicious", 0)
-        total = sum(stats.values())
+        malicious = stats.get("malicious", 0)  # Count of malicious detections.
+        total = sum(stats.values())  # Total number of detections.
+        # Calculate the percentage of malicious detections.
         percentage = (malicious / total * 100) if total > 0 else 0
         return percentage
-    return None
+    return None  # Return None if the request failed.
 
 def scan_url(url):
-    """Scan a URL for malicious activity using VirusTotal."""
+    """
+    Scan a URL for malicious activity using VirusTotal.
+
+    Parameters:
+        - url: The URL to scan.
+
+    Returns:
+        The percentage of detections flagged as malicious, or None on failure.
+    """
+    # VirusTotal API endpoint for URL submission.
     submit_url = "https://www.virustotal.com/api/v3/urls"
-    payload = {"url": url}
-    response = requests.post(submit_url, headers=HEADERS, data=payload)
-    if response.status_code == 200:
+    # Submit the URL for analysis.
+    response = requests.post(submit_url, headers=HEADERS, data={"url": url})
+    if response.status_code == 200:  # Check if the submission was successful.
+        # Encode the URL in a format accepted by the API.
         url_id = base64.urlsafe_b64encode(url.encode()).decode().strip("=")
-        time.sleep(15)  # Wait for analysis to complete.
+        time.sleep(15)  # Wait to ensure the analysis completes.
+        # Fetch the scan results using the encoded URL.
         result_url = f"https://www.virustotal.com/api/v3/urls/{url_id}"
         result_response = requests.get(result_url, headers=HEADERS)
-        if result_response.status_code == 200:
+        if result_response.status_code == 200:  # Check if the results were retrieved successfully.
             data = result_response.json()
+            # Extract analysis statistics from the results.
             stats = data.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
-            malicious = stats.get("malicious", 0)
-            total = sum(stats.values())
+            malicious = stats.get("malicious", 0)  # Count of malicious detections.
+            total = sum(stats.values())  # Total number of detections.
+            # Calculate the percentage of malicious detections.
             percentage = (malicious / total * 100) if total > 0 else 0
             return percentage
-    return None
+    return None  # Return None if the request failed.
 
 if __name__ == "__main__":
+    # Prompt the user to enter an IP address for scanning.
     ip = input("Enter an IP address to scan: ").strip()
-    if ip:
+    if ip:  # Check if input is not empty.
         print(f"Scanning IP: {ip}")
-        mal_percent = scan_ip(ip)
-        if mal_percent is not None:
+        mal_percent = scan_ip(ip)  # Perform the IP scan.
+        if mal_percent is not None:  # Check if the scan was successful.
             print(f"Malicious Percentage: {mal_percent:.2f}%")
+            # Fetch and display geolocation details for the IP.
             location = get_ip_location(ip)
             if location:
                 print("Location Details:")
                 for key, value in location.items():
                     print(f"  {key}: {value}")
         else:
-            print("Failed to scan IP.")
+            print("Failed to scan IP.")  # Inform the user of a failed scan.
 
+    # Prompt the user to enter a URL for scanning.
     url = input("\nEnter a URL to scan: ").strip()
-    if url:
+    if url:  # Check if input is not empty.
         print(f"Scanning URL: {url}")
-        mal_percent = scan_url(url)
-        if mal_percent is not None:
+        mal_percent = scan_url(url)  # Perform the URL scan.
+        if mal_percent is not None:  # Check if the scan was successful.
             print(f"Malicious Percentage: {mal_percent:.2f}%")
         else:
-            print("Failed to scan URL.")
+            print("Failed to scan URL.")  # Inform the user of a failed scan.
